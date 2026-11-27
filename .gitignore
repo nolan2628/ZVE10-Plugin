@@ -21,3 +21,6 @@ __pycache__/
 Thumbs.db
 .vscode/
 .idea/
+
+# Local firmware update package (359 MB, not part of the repo)
+.info/

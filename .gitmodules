@@ -7,3 +7,6 @@
 [submodule "third_party/pmca"]
 	path = third_party/pmca
 	url = https://github.com/ma1co/Sony-PMCA-RE.git
+[submodule "third_party/zve10-toolkit"]
+	path = third_party/zve10-toolkit
+	url = https://github.com/dino2048/zv-e10-toolkit.git

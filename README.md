@@ -145,11 +145,11 @@
 <summary><b>点此展开：编译环境、测试命令、相机载入与项目目录（面向开发者与进阶用户）</b></summary>
 
 ### 1. 环境准备
-- **仅直接推送使用**：安装 [`uv`](https://docs.astral.sh/uv/)，并使用 `git clone --recursive`（或运行 `git submodule update --init third_party/camtool third_party/pmca`）获取内置调试工具与认证层，即可直接将预编译产物 [`prebuilt/libzve10plugin.so`](prebuilt/libzve10plugin.so) 推送到相机。
+- **仅直接推送使用**：安装 [`uv`](https://docs.astral.sh/uv/)，并使用 `git clone --recursive`（或运行 `git submodule update --init third_party/camtool third_party/pmca third_party/zve10-toolkit`）获取内置调试工具、认证层与 Jiritsu 部署工具，即可直接将预编译产物 [`prebuilt/libzve10plugin.so`](prebuilt/libzve10plugin.so) 推送到相机。
 - **自行修改编译**（可选）：
   - 主机测试：Linux / WSL2（`cmake`、`gcc`）
   - 交叉编译：`arm-linux-gnueabi-gcc` / `arm-linux-gnueabi-g++`
-  - 拉取全部子模块源码（LVGL `v9.2.2` + Camtool + PMCA）：`git clone --recursive ...` 或运行 `git submodule update --init --recursive`
+  - 拉取全部子模块源码（LVGL `v9.2.2` + Camtool + PMCA + zve10-toolkit）：`git clone --recursive ...` 或运行 `git submodule update --init --recursive`
 
 ### 2. 主机单元测试与交叉编译（可选）
 ```bash
@@ -174,6 +174,22 @@ uv run --with pillow python tools/gen_zh_font.py
 ```
 
 ### 3. 通过电脑连接相机载入体验
+
+固件 2.03（`30110_06.2026060501`）请选择 Jiritsu 后端。正常开机使用 ssboot/UPM 暖启动快照恢复，不执行 `init`/`bootin`，因此 preload 只在真正冷启动时生效：WBI 仍有效时，先按 [WBI 冷启动 Runbook](docs/WBI_COLDBOOT_RUNBOOK.md) 完成一次受控的 WBI 失效和物理冷启动。旧 FileControl 接口在该固件的实测连接中返回 `128 / 0x80`，默认 Camtool 路径会显示 `health 失败`。Jiritsu 后端复用 [zv-e10-toolkit](https://github.com/dino2048/zv-e10-toolkit) 的加密文件读取、持久会话和加载器清理。更多限制与验证判据见 [2.03 运行注意事项](docs/ZVE10_FW203_RUNTIME_NOTES.md)。
+
+```powershell
+git submodule update --init third_party/camtool third_party/pmca third_party/zve10-toolkit
+uv run python tools/probe_zve10_runtime.py --backend jiritsu --deploy --so prebuilt/libzve10plugin.so
+```
+
+`--deploy` 会在一个 USB 会话中完成 ABI 校验、双次固件版本检查、原厂基线检查、分块上传与 SHA-256 回读校验、preload 设置。WBI 已失效的相机可以在同一条命令后加 `--reboot`，让冷启动加载插件；WBI 仍有效时不要加 `--reboot`（会暖恢复，preload 不执行）。任何一步失败都会停止后续步骤。会话记录保存在命令输出的本机临时目录中。
+
+Windows 下，Jiritsu 后端会分别为 `054C:0D95` 与 `054C:0336` 选择可用的 libusb 1.0 或 libusb-win32 连接。服务接口绑定 libusb-win32 时，需要本机存在 `libusb0.dll`，也可通过 `LIBUSB0_PATH` 指定其路径。
+
+重启或冷启动后执行 `--backend jiritsu --wbi-verify` 确认 `__WARMBOOT__=0`、`__DMODE__=3p`、`__MAPS__>=1`，再用 `--backend jiritsu --logs` 查看插件日志。日志中出现 `画布初始化完成` 和 `UI主线程激活成功: ... canvas=1` 后，拔 USB、打开一次原厂 MENU 再退出回取景画面，按 C1 验证插件菜单。恢复原厂启动模式可执行 `--backend jiritsu --disable-preload --reboot`。
+
+以下为默认 Camtool 后端的操作步骤。
+
 部署脚本默认会自动优先使用 `build-arm/libzve10plugin.so`，若未编译则直接使用仓库内置的 `prebuilt/libzve10plugin.so`，并自动调用内置子模块 `third_party/camtool/cam.py`（也可通过 `--cam-py` / `ZVP_CAM_PY` 指定其他路径）。
 
 1. **配置 Windows USB 驱动（首次需要）**：下载并运行 [`zadig-2.9.exe`](https://github.com/pbatard/libwdi/releases/download/v1.5.1/zadig-2.9.exe)，相机开机且 USB 连接模式设为 **大容量存储** 后接上电脑；在 Zadig 下拉框找到相机设备（如未出现可勾选 `Options -> List All Devices`），将驱动切换安装为 **`libusbK`** 版本。
@@ -218,8 +234,9 @@ ZVE10-Plugin/
 ├── third_party/
 │   ├── camtool/            # Sony-ZVE-10-Camtool USB 调试工具 (Git Submodule)
 │   ├── lvgl/               # LVGL v9.2.2 界面库 (Git Submodule)
-│   └── pmca/               # Sony-PMCA-RE USB 认证层依赖 (Git Submodule)
-├── tools/                  # 字库生成、ABI 校验与部署工具
+│   ├── pmca/               # Sony-PMCA-RE USB 认证层依赖 (Git Submodule)
+│   └── zve10-toolkit/      # ZV-E10 Jiritsu 部署与文件读取工具 (Git Submodule)
+├── tools/                  # 字库生成、ABI 校验、部署与 WBI 工具
 ├── AGENTS.md               # AI Agent 入口与安全守则
 ├── CMakeLists.txt
 ├── LICENSE
@@ -264,6 +281,7 @@ ZVE10-Plugin/
 | [ivica00/bionz-x-research](https://github.com/ivica00/bionz-x-research) | `See repo` | ZV-E10 原厂主菜单与 Fn 菜单全界面触控 (`MTF2`) 逆向研究与验证 |
 | [nolan2628/Sony-ZVE-10-Camtool](https://github.com/nolan2628/Sony-ZVE-10-Camtool) | `See repo` | ZV-E10 USB 调试、文件推送与重启通道（内置为 `third_party/camtool` 子模块） |
 | [ma1co/Sony-PMCA-RE](https://github.com/ma1co/Sony-PMCA-RE) | `MIT` | Sony USB MSC/Senser 握手与服务认证底层库（内置为 `third_party/pmca` 子模块） |
+| [dino2048/zv-e10-toolkit](https://github.com/dino2048/zv-e10-toolkit) | `MIT` | ZV-E10 Jiritsu 部署、加密文件读取与持久会话工具（内置为 `third_party/zve10-toolkit` 子模块） |
 | [lvgl/lvgl](https://github.com/lvgl/lvgl) | `MIT` | 驱动相机屏幕悬浮菜单的轻量级图形界面库 |
 
 ---

@@ -145,11 +145,11 @@ Safety and reversibility come first. You can return to 100% stock camera behavio
 <summary><b>Click to expand: Build instructions, tests, USB staging commands & repository structure</b></summary>
 
 ### 1. Prerequisites
-- **Direct Camera Loading (No Compiler Needed)**: Install [`uv`](https://docs.astral.sh/uv/) and clone with `--recursive` (or run `git submodule update --init third_party/camtool third_party/pmca`) to fetch the bundled USB debugger and auth layer, then push the prebuilt [`prebuilt/libzve10plugin.so`](prebuilt/libzve10plugin.so) directly.
+- **Direct Camera Loading (No Compiler Needed)**: Install [`uv`](https://docs.astral.sh/uv/) and clone with `--recursive` (or run `git submodule update --init third_party/camtool third_party/pmca third_party/zve10-toolkit`) to fetch the bundled USB debugger, auth layer and Jiritsu deployment toolkit, then push the prebuilt [`prebuilt/libzve10plugin.so`](prebuilt/libzve10plugin.so) directly.
 - **Building from Source (Optional)**:
   - Host tests: Linux / WSL2 (`cmake`, `gcc`)
   - ARM cross-build: `arm-linux-gnueabi-gcc` / `arm-linux-gnueabi-g++`
-  - Fetch all submodules (LVGL `v9.2.2` + Camtool + PMCA): `git clone --recursive ...` or run `git submodule update --init --recursive`
+  - Fetch all submodules (LVGL `v9.2.2` + Camtool + PMCA + zve10-toolkit): `git clone --recursive ...` or run `git submodule update --init --recursive`
 
 ### 2. Build & Verify (Optional)
 ```bash
@@ -174,6 +174,22 @@ uv run --with pillow python tools/gen_zh_font.py
 ```
 
 ### 3. Load onto Camera via USB
+
+On firmware 2.03 (`30110_06.2026060501`), select the Jiritsu backend. Normal boot uses an ssboot/UPM warm-start snapshot and does not run `init`/`bootin`, so preload only takes effect on a genuine cold boot. If WBI is still valid, first complete a controlled WBI invalidation and physical cold boot as described in the [WBI cold-boot runbook](docs/WBI_COLDBOOT_RUNBOOK.md). Legacy FileControl returned `128 / 0x80` in tested sessions on this firmware, causing the default Camtool health check to fail. This backend reuses encrypted file reads, a persistent shell and loader cleanup from [zv-e10-toolkit](https://github.com/dino2048/zv-e10-toolkit). See the [2.03 runtime notes](docs/ZVE10_FW203_RUNTIME_NOTES.md) (Chinese) for further constraints and verification criteria.
+
+```powershell
+git submodule update --init third_party/camtool third_party/pmca third_party/zve10-toolkit
+uv run python tools/probe_zve10_runtime.py --backend jiritsu --deploy --so prebuilt/libzve10plugin.so
+```
+
+`--deploy` verifies the ELF ABI, checks the installed firmware twice, validates factory bytes, uploads the plugin with SHA-256 readback verification and enables preload in one USB session. On a camera whose WBI is already invalidated, add `--reboot` in the same command to load the plugin on cold boot; do not add `--reboot` while WBI is still valid (the camera will warm-restore and preload will not run). Each failure stops subsequent operations. Session records are saved in the local temporary directory printed by the command.
+
+On Windows, the Jiritsu backend selects an accessible libusb 1.0 or libusb-win32 connection independently for `054C:0D95` and `054C:0336`. An interface using libusb-win32 requires the installed `libusb0.dll`; `LIBUSB0_PATH` can select its location.
+
+After reboot or cold boot, run `--backend jiritsu --wbi-verify` and require `__WARMBOOT__=0`, `__DMODE__=3p` and `__MAPS__>=1`, then use `--backend jiritsu --logs` to read the plugin log. Once `画布初始化完成` and `UI主线程激活成功: ... canvas=1` appear, unplug USB, open the stock MENU once, return to the viewfinder and press C1 to verify the plugin menu. To restore factory startup, run `--backend jiritsu --disable-preload --reboot`.
+
+The following steps use the default Camtool backend.
+
 By default, the helper script prefers `build-arm/libzve10plugin.so` if present, otherwise uses [`prebuilt/libzve10plugin.so`](prebuilt/libzve10plugin.so), and invokes the bundled submodule `third_party/camtool/cam.py` (overridable via `--cam-py` / `ZVP_CAM_PY`).
 
 1. **Install Windows USB Driver (First Time)**: Download [`zadig-2.9.exe`](https://github.com/pbatard/libwdi/releases/download/v1.5.1/zadig-2.9.exe), turn on your camera with USB Connection set to **Mass Storage**, connect it to the PC, select the camera in Zadig (`Options -> List All Devices` if hidden), and install the **`libusbK`** driver.
@@ -218,8 +234,9 @@ ZVE10-Plugin/
 ├── third_party/
 │   ├── camtool/            # Sony-ZVE-10-Camtool USB debugger (Git Submodule)
 │   ├── lvgl/               # LVGL v9.2.2 graphics library (Git Submodule)
-│   └── pmca/               # Sony-PMCA-RE USB auth dependency (Git Submodule)
-├── tools/                  # Font generator, ABI checker & camera deployment helper
+│   ├── pmca/               # Sony-PMCA-RE USB auth dependency (Git Submodule)
+│   └── zve10-toolkit/      # ZV-E10 Jiritsu deployment and file-read toolkit (Git Submodule)
+├── tools/                  # Font generator, ABI checker, deployment and WBI tools
 ├── AGENTS.md               # AI Agent routing & safety guardrails
 ├── CMakeLists.txt
 ├── LICENSE
@@ -264,6 +281,7 @@ This project builds on the research and open-source contributions of:
 | [ivica00/bionz-x-research](https://github.com/ivica00/bionz-x-research) | `See repo` | ZV-E10 native MENU & Fn touch integration (`MTF2`) RE and port reference |
 | [nolan2628/Sony-ZVE-10-Camtool](https://github.com/nolan2628/Sony-ZVE-10-Camtool) | `See repo` | ZV-E10 USB service-mode debugger, file staging, and reboot toolkit (`third_party/camtool` submodule) |
 | [ma1co/Sony-PMCA-RE](https://github.com/ma1co/Sony-PMCA-RE) | `MIT` | Sony USB MSC/Senser authentication & transport library (`third_party/pmca` submodule) |
+| [dino2048/zv-e10-toolkit](https://github.com/dino2048/zv-e10-toolkit) | `MIT` | ZV-E10 Jiritsu deployment, encrypted file reads and persistent shell toolkit (`third_party/zve10-toolkit` submodule) |
 | [lvgl/lvgl](https://github.com/lvgl/lvgl) | `MIT` | Lightweight embedded UI library powering the overlay menu |
 
 ---
